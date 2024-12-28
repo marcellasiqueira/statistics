@@ -1,0 +1,563 @@
+---
+title: "Projeto final da disciplina de Estatística Experimental"
+author: "Marcella Siqueira"
+output:
+  html_document:
+    theme: readable
+    df_print: paged
+    toc: yes
+  html_notebook:
+    fig_width: 7
+    theme: readable
+    toc: yes
+    toc_float: yes
+---
+
+Dados coletados diretamente do site: <https://dadosabertos.camara.leg.br/swagger/api.html#staticfile>
+
+Para este projeto, foram coletados dados dos gastos de deputados federais de todo o Brasil durante o período de 2017 a 2022. Após limpeza dos dados, contamos com atributos de:
+
+- Nome do parlamentar
+- CPF do parlamentar
+- Estado do parlamentar
+- Partido do parlamentar
+- Descrição do gasto do parlamentar
+- Fornecedor referente ao gasto
+- Data da emissão da nota do gasto
+- Valor bruto do documento
+- Valor de glosa do documento
+- Valor líquido do documento
+- Mês referente ao gasto
+- Ano referente ao gasto
+
+Inicialmente foi realizada uma análise exploratória a partir desta base de dados.
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(hrbrthemes)
+library(forcats)
+theme_set(theme_bw())
+options(scipen = 100)
+```
+
+```{r message=FALSE, warning=FALSE}
+dados <- list.files(path = "dados/", 
+                       pattern = "*.csv", full.names = TRUE) %>% 
+  lapply(read_csv) %>%                              
+  bind_rows                                        
+```
+
+```{r}
+dados <- dados %>% 
+  select(-ideCadastro, -nuCarteiraParlamentar, -nuLegislatura, -codLegislatura, -numSubCota, -numEspecificacaoSubCota, -txtDescricaoEspecificacao, -txtCNPJCPF, -txtNumero, -indTipoDocumento, -numParcela, -txtPassageiro, -txtTrecho, -numLote, -numRessarcimento, -vlrRestituicao, -datPagamentoRestituicao, -nuDeputadoId, -ideDocumento, -urlDocumento) %>% 
+  filter(!is.na(sgUF)) %>% 
+  filter(!is.na(sgPartido)) %>% 
+  filter(vlrLiquido > 0)
+```
+
+## Quanto os nossos deputados gastaram anualmente?
+
+Aqui buscamos visualizar o valor total dos gastos dos deputados a cada ano coletado. Temos sempre valores na casa dos 200 milhões, sendo a única exceção o ano de 2020, em que o gasto cai para menos de 180 milhões, sendo este o ano de início da pandemia. Nos anos seguintes o gasto volta a subir.
+
+```{r}
+por_ano <- dados %>% 
+  group_by(numAno) %>%
+  summarise(total_ano = sum(vlrLiquido))
+```
+
+```{r}
+por_ano %>%
+  tail(12) %>% 
+  ggplot(aes(x=numAno, y=total_ano)) +
+    geom_line() +
+    geom_point() +
+  # scale_y_continuous(breaks = c(170000000, 180000000,190000000,200000000,210000000,220000000,230000000,240000000,250000000)) +
+  scale_x_continuous(breaks=c(2017,2018,2019,2020,2021,2022)) +
+  labs(
+    x = "Ano",
+    y = "Gasto total",
+    title = "Gasto total dos deputados por ano"
+  )
+```
+
+## Quanto os nossos deputados gastam por ano?
+
+Geramos um boxplot para visualizar a média de gasto dos deputados anualmente e seus respectivos outliers.
+
+```{r}
+deputado_ano <- dados %>% 
+  group_by(txNomeParlamentar, numAno) %>% 
+  summarise(total_deputado = sum(vlrLiquido), 
+              .groups = "drop")
+```
+
+```{r}
+deputado_ano %>%
+  ggplot(aes(x=as.factor(numAno), y=total_deputado)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) +
+  labs(
+    x = "Ano",
+    y = "Gasto total",
+    title = "Gastos de cada deputado por ano"
+  )
+```
+
+## Qual partido gasta mais?
+
+Procuramos entender agora quais os partidos que mais tiveram gastos nestes anos analisados. Uma importante verificação é a de quantos deputados cada um desses partidos tem como representantes na Câmara.
+
+```{r}
+por_partido <- dados %>%
+  group_by(sgPartido) %>%
+  summarise(total_partido = sum(vlrLiquido))
+```
+
+```{r}
+por_partido %>%
+  mutate(partido = fct_reorder(sgPartido, total_partido)) %>%
+  # tail(10) %>% 
+  ggplot(aes(x=partido, y=total_partido)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip()  +
+  # scale_y_continuous(breaks = seq(20000, 20000000, by = 2000000)) +
+  labs(
+    x = "Partido",
+    y = "Gasto total",
+    title = "Gasto total dos deputados por partido"
+  )
+```
+## Quantos deputados temos por partido?
+
+```{r}
+deputados_partido <- dados %>%
+    filter(!is.na(sgPartido)) %>%
+    group_by(sgPartido) %>% 
+    summarise(deputados = n_distinct(cpf), 
+              .groups = "drop") %>% 
+  arrange(desc(deputados)) %>%    # First sort by val. This sort the dataframe but NOT the factor levels
+  mutate(sgPartido=factor(sgPartido, levels=sgPartido))  # This trick update the factor levels
+```
+
+```{r}
+deputados_partido %>%
+  # arrange(deputados) %>%    # First sort by val. This sort the dataframe but NOT the factor levels
+  # mutate(sgPartido=factor(sgPartido, levels=sgPartido)) %>%   # This trick update the factor levels
+  ggplot(aes(x=sgPartido, y=deputados)) +
+    geom_segment(aes(xend=sgPartido, yend=0)) +
+    geom_point(size=4, color="orange") +
+    coord_flip() +
+    theme_bw() +
+    xlab("")
+```
+
+```{r}
+# Set a number of 'empty bar'
+empty_bar <- 10
+ 
+# Add lines to the initial dataset
+to_add <- matrix(NA, empty_bar, ncol(deputados_partido))
+colnames(to_add) <- colnames(deputados_partido)
+deputados_partido <- rbind(deputados_partido, to_add)
+deputados_partido$id <- seq(1, nrow(deputados_partido))
+ 
+# Get the name and the y position of each label
+label_data <- deputados_partido
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) /number_of_bar     # I substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+label_data$sgPartido <- paste(label_data$sgPartido, " (", label_data$deputados,")", sep="")
+```
+
+```{r}
+deputados_partido %>%
+  ggplot(aes(x=as.factor(id), y=deputados)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+  geom_bar(stat="identity", fill=alpha("#69b3a2", 0.8)) +
+  ylim(-100,120) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(0.1,4), "cm") 
+  ) +
+  coord_polar(start = 0) + 
+  geom_text(data=label_data, aes(x=id, y=deputados+10, label=sgPartido, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.6, angle= label_data$angle, inherit.aes = FALSE ) +
+  labs(title = "Quantos deputados temos por partido?")
+```
+
+## Com o que os deputados gastam mais?
+
+Tendo acesso às categorias dos gastos dos deputados, buscamos entender quais seriam seus maiores gastos. Temos **divulgação da atividade parlamentar**, **passagem aérea** e **locação ou fretamento de veículos automotores** sendo as categorias em que mais gastaram. 
+
+```{r}
+por_categoria <- dados %>% 
+  group_by(txtDescricao) %>%
+  summarise(total_categoria = sum(vlrLiquido))
+```
+
+```{r}
+por_categoria %>%
+  mutate(categoria = fct_reorder(txtDescricao, total_categoria)) %>%
+  ggplot(aes(x=categoria, y=total_categoria)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip()  +
+  # scale_y_continuous(breaks = seq(20000, 20000000, by = 2000000)) +
+  labs(
+    x = "Categoria do gasto",
+    y = "Gasto total",
+    title = "Gastos dos deputados"
+  )
+```
+
+## Como esses gastos se distribuem?
+
+Realizamos uma distribuição dos nossos dados através de um histograma e é visualmente perceptível que não estamos lidando com dados normais.
+
+```{r}
+dados %>%
+  ggplot(aes(x = vlrLiquido)) +
+  geom_histogram(binwidth = .5,
+                 colour = "darkorange",
+                 fill = "white") + 
+  labs(title = "Distribuição de gastos",
+       x = "Frequência",
+       y = "Valor líquido gasto")
+```
+
+## Quais regiões tiveram maiores gastos?
+
+Observamos os gastos agora por regiões às quais os deputados pertenciam. Dois diferentes gráficos foram gerados para visualizarmos esse resultado.
+
+```{r}
+norte <- c("AM","RR","AP","PA","TO","RO","AC")
+nordeste <- c("MA","PI","CE","RN","PE","PB","SE","AL","BA")
+sudeste <- c("SP","RJ","ES","MG")
+centro <- c("MT","MS","GO","DF")
+sul <- c("PR","RS","SC")
+```
+
+```{r}
+teste <- dados %>%
+  mutate(regiao = case_when(sgUF %in% norte ~ "Norte",
+                           sgUF %in% nordeste ~ "Nordeste",
+                           sgUF %in% sudeste ~ "Sudeste",
+                           sgUF %in% centro ~ "Centro-Oeste",
+                           sgUF %in% sul ~ "Sul"))
+```
+
+```{r}
+gasto_ano_regiao <- teste %>%
+    group_by(regiao, numAno) %>% 
+    summarise(gasto = sum(vlrLiquido), 
+              .groups = "drop")
+```
+
+```{r}
+gasto_ano_regiao %>% 
+  ggplot(aes(x = numAno, y = gasto, color = regiao)) + 
+    geom_point() + 
+    geom_line() +
+  scale_x_continuous(breaks=c(2017,2018,2019,2020,2021,2022)) +
+  labs(
+    x = "Ano",
+    y = "Gasto total",
+    color = "Região",
+    title = "Gasto por região ao longo dos anos"
+  )
+```
+
+```{r}
+gasto_ano_regiao %>% 
+  ggplot(aes(x = numAno, y = gasto)) + 
+    geom_point() + 
+    geom_line() +
+  facet_wrap(~ regiao, ncol = 2) +
+  scale_x_continuous(breaks=c(2017,2018,2019,2020,2021,2022)) +
+  labs(
+    x = "Ano",
+    y = "Gasto total",
+    title = "Gasto por região ao longo dos anos"
+  )
+```
+
+## Quantos deputados temos por região?
+
+```{r}
+deputados_regiao <- teste %>%
+    group_by(regiao) %>% 
+    summarise(deputados = n_distinct(cpf), 
+              .groups = "drop")
+```
+
+```{r}
+deputados_regiao$fracao <- deputados_regiao$deputados / sum(deputados_regiao$deputados)
+```
+
+```{r}
+deputados_regiao$ymax <- cumsum(deputados_regiao$fracao)
+```
+
+```{r}
+deputados_regiao$ymin <- c(0, head(deputados_regiao$ymax, n=-1))
+```
+
+```{r}
+deputados_regiao$labelPosition <- (deputados_regiao$ymax + deputados_regiao$ymin) / 2
+```
+
+```{r}
+deputados_regiao$label <- paste0(deputados_regiao$regiao, "\n", deputados_regiao$deputados, " deputados")
+```
+
+```{r}
+deputados_regiao %>% 
+  ggplot(aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=regiao)) +
+  geom_rect() +
+  geom_label(x=3.5, aes(y=labelPosition, label=label), size=2.5) +
+  scale_fill_brewer(palette=4) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none") +
+  labs(
+    title = "Quantos deputados temos por região?"
+  )
+```
+
+## Quanto se gastou durante a pandemia?
+
+Procuramos entender se os gastos durante a pandemia se mantiveram semelhantes aos gastos no período pré pandemia ou se ocorreram mudanças neste sentido. Três diferentes visualizações foram geradas para observamos essa diferença com mais detalhes.
+
+```{r}
+pre_pandemia <- c(2017,2018,2019)
+pandemia <- c(2020,2021,2022)
+```
+
+```{r}
+teste2 <- dados %>%
+  mutate(periodo = case_when(numAno %in% pre_pandemia ~ "Pré pandemia",
+                           numAno %in% pandemia ~ "Pandemia"))
+```
+
+```{r}
+gasto_periodo <- teste2 %>%
+    group_by(periodo, numAno) %>% 
+    summarise(gasto = sum(vlrLiquido), 
+              .groups = "drop")
+```
+
+```{r}
+gasto_periodo %>% 
+  ggplot(aes(x = numAno, y = gasto)) + 
+    geom_point() + 
+    geom_line() +
+  facet_wrap(~factor(periodo, levels=c("Pré pandemia", "Pandemia")), ncol = 2) +
+  scale_x_continuous(breaks=c(2017,2018,2019,2020,2021,2022)) +
+  labs(
+    x = "Ano",
+    y = "Gasto total",
+    title = "Gastos antes e durante a pandemia"
+  )
+```
+
+```{r}
+gasto_periodo %>% 
+  ggplot(aes(x = numAno, y = gasto, color = periodo)) + 
+    geom_point() + 
+    geom_line() +
+  scale_x_continuous(breaks=c(2017,2018,2019,2020,2021,2022)) +
+  labs(
+    x = "Ano",
+    y = "Gasto total",
+    color = "Período",
+    title = "Gastos antes e durante a pandemia"
+  )
+```
+
+```{r}
+gasto_periodo %>%
+  arrange(gasto) %>% 
+  mutate(periodo = factor(periodo, levels=c("Pré pandemia", "Pandemia"))) %>% 
+  ggplot(aes(x=as.factor(periodo), y=gasto)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) +
+  labs(
+    x = "Ano",
+    y = "Gasto total",
+    title = "Gastos por período"
+  )
+```
+
+### Quais os gastos dos deputados pré e durante a pandemia?
+
+Buscamos entender se os gastos por categoria se mantiveram os mesmos durante estes diferentes períodos da nossa história recente. É perceptível o quanto os gastos com passagens aéreas foram reduzidos durante este período pandêmico.
+
+```{r}
+tipo_gasto_periodo <- teste2 %>% 
+  group_by(txtDescricao, periodo) %>% 
+  summarise(total_categoria = sum(vlrLiquido), 
+              .groups = "drop")
+```
+
+### Pré-pandemia
+
+```{r}
+tipo_gasto_periodo %>%
+  filter(periodo == "Pré pandemia") %>%
+  arrange(total_categoria) %>% 
+  mutate(txtDescricao = factor(txtDescricao, levels=txtDescricao)) %>%
+  top_n(20, total_categoria) %>% 
+  ggplot(aes(x=txtDescricao, y=total_categoria)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip()  +
+  # facet_wrap(~factor(periodo, levels=c("Pré pandemia", "Pandemia")), ncol = 1) +
+  labs(
+    x = "Categoria do gasto",
+    y = "Gasto total",
+    title = "Gastos dos deputados"
+  )
+```
+
+### Durante a pandemia
+
+```{r}
+tipo_gasto_periodo %>%
+  filter(periodo == "Pandemia") %>%
+  arrange(total_categoria) %>% 
+  mutate(txtDescricao = factor(txtDescricao, levels=txtDescricao)) %>%
+  top_n(20, total_categoria) %>% 
+  ggplot(aes(x=txtDescricao, y=total_categoria)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip()  +
+  # facet_wrap(~factor(periodo, levels=c("Pré pandemia", "Pandemia")), ncol = 1) +
+  labs(
+    x = "Categoria do gasto",
+    y = "Gasto total",
+    title = "Gastos dos deputados"
+  )
+```
+
+## Quais deputados gastaram mais nos períodos pré e durante a pandemia?
+
+```{r}
+deputado_periodo <- teste2 %>% 
+  group_by(txNomeParlamentar, periodo) %>% 
+  summarise(total_deputado = sum(vlrLiquido), 
+              .groups = "drop")
+```
+
+### Pré-pandemia
+
+```{r}
+deputado_periodo %>%
+  filter(periodo == "Pré pandemia") %>%
+  arrange(total_deputado) %>% 
+  mutate(txNomeParlamentar = factor(txNomeParlamentar, levels=txNomeParlamentar)) %>%
+  top_n(20, total_deputado) %>% 
+  ggplot(aes(x=txNomeParlamentar, y=total_deputado)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip()  +
+  # facet_wrap(~factor(periodo, levels=c("Pré pandemia", "Pandemia")), ncol = 1) +
+  labs(
+    x = "Nome do deputado",
+    y = "Gasto total",
+    title = "Gastos dos deputados no período pré-pandemia"
+  )
+```
+
+### Durante a pandemia
+
+```{r}
+deputado_periodo %>%
+  filter(periodo == "Pandemia") %>%
+  arrange(total_deputado) %>% 
+  mutate(txNomeParlamentar = factor(txNomeParlamentar, levels=txNomeParlamentar)) %>%
+  top_n(20, total_deputado) %>% 
+  ggplot(aes(x=txNomeParlamentar, y=total_deputado)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip()  +
+  # facet_wrap(~factor(periodo, levels=c("Pré pandemia", "Pandemia")), ncol = 1) +
+  labs(
+    x = "Nome do deputado",
+    y = "Gasto total",
+    title = "Gastos dos deputados durante a pandemia"
+  )
+```
+
+Gráficos: 
+- número de deputados por região
+- número de deputados por partido
+
+https://www.ufrgs.br/wiki-r/index.php?title=Teste_de_Postos_com_Sinais_de_Wilcoxon
+
+## Perguntas
+- medidas de posição (média e mediana)
+(a média sofre influência dos outliers, por isso escolhemos trabalhar com mediana para responder nossas perguntas)
+
+### A mediana dos gastos é a mesma entre os partidos com maior base do país? (escolher os dois partidos com mais deputados)
+
+```{r}
+pp <- dados %>%
+    filter(sgPartido == "PP") %>% 
+    select(vlrLiquido)
+pl <- dados %>%
+    filter(sgPartido == "PL") %>% 
+    select(vlrLiquido)
+```
+
+```{r}
+TesteWilcox1 <- wilcox.test(
+  pp$vlrLiquido,pl$vlrLiquido, alternative = "two.sided")
+```
+
+```{r}
+TesteWilcox1
+```
+
+```{r}
+kruskal.test(vlrLiquido~sgPartido, data = dados)
+```
+
+### A mediana de gastos é a mesma pré e durante pandemia?
+
+```{r}
+pre <- teste2 %>%
+    filter(periodo == "Pré pandemia")
+durante <- teste2 %>%
+    filter(periodo == "Pandemia")
+```
+
+```{r}
+TesteWilcox2 <- wilcox.test(
+  pre$vlrLiquido,durante$vlrLiquido, alternative = "two.sided")
+```
+
+```{r}
+TesteWilcox2
+```
+
+### A mediana de gastos é a mesma entre diferentes regiões? Nordeste (tem mais deputados) e Sul (tem menos deputados)
+
+```{r}
+nordeste_teste <- teste %>%
+    filter(regiao == "Nordeste")
+centro_teste <- teste %>%
+    filter(regiao == "Centro-Oeste")
+```
+
+```{r}
+TesteWilcox3 <- wilcox.test(
+  nordeste_teste$vlrLiquido,centro_teste$vlrLiquido, alternative = "two.sided")
+```
+
+```{r}
+TesteWilcox3
+```
+
+```{r}
+kruskal.test(vlrLiquido~regiao, data = teste)
+```
+
